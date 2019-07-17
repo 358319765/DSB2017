@@ -1,3 +1,4 @@
+#-*- coding:utf-8 -*-
 from preprocessing import full_prep
 from config_submit import config as config_submit
 
@@ -18,12 +19,15 @@ from test_detect import test_detect
 from importlib import import_module
 import pandas
 
+# 读取一些配置
 datapath = config_submit['datapath']
 prep_result_path = config_submit['preprocess_result_path']
 skip_prep = config_submit['skip_preprocessing']
 skip_detect = config_submit['skip_detect']
 
+# 是否跳过预处理
 if not skip_prep:
+    #
     testsplit = full_prep(datapath,prep_result_path,
                           n_worker = config_submit['n_worker_preprocessing'],
                           use_existing=config_submit['use_exsiting_preprocessing'])

@@ -1,3 +1,4 @@
+#-*- coding:utf-8 -*-
 import os
 import numpy as np
 from scipy.io import loadmat
@@ -59,9 +60,10 @@ def resample(imgs, spacing, new_spacing,order = 2):
     else:
         raise ValueError('wrong shape')
 
-def savenpy(id,filelist,prep_folder,data_path,use_existing=True):      
+def savenpy(id,filelist,prep_folder,data_path,use_existing=True):
     resolution = np.array([1,1,1])
     name = filelist[id]
+    # use_existing参数用来考虑是否判断已经做过提前处理了
     if use_existing:
         if os.path.exists(os.path.join(prep_folder,name+'_label.npy')) and os.path.exists(os.path.join(prep_folder,name+'_clean.npy')):
             print(name+' had been done')
@@ -109,7 +111,7 @@ def savenpy(id,filelist,prep_folder,data_path,use_existing=True):
 
     
 def full_prep(data_path,prep_folder,n_worker = None,use_existing=True):
-    warnings.filterwarnings("ignore")
+    warnings.filterwarnings("ignore") #用来抑制第三方库产生的警告
     if not os.path.exists(prep_folder):
         os.mkdir(prep_folder)
 
@@ -117,8 +119,10 @@ def full_prep(data_path,prep_folder,n_worker = None,use_existing=True):
     print('starting preprocessing')
     pool = Pool(n_worker)
     filelist = [f for f in os.listdir(data_path)]
+    # partial作用是固定一些参数，具体参考以下网址
+    # https://blog.csdn.net/joeyon1985/article/details/41984487
     partial_savenpy = partial(savenpy,filelist=filelist,prep_folder=prep_folder,
-                              data_path=data_path,use_existing=use_existing)
+                              data_path=data_path,use_existing=use_existing)# 只剩下一个id属性未传入，即该函数（partial_savenpy）只需要传入一个id属性即可运行
 
     N = len(filelist)
     _=pool.map(partial_savenpy,range(N))
