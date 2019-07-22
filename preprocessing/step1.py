@@ -1,17 +1,22 @@
+#-*- coding:utf-8 -*-
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 import dicom
 import os
 import scipy.ndimage
 import matplotlib.pyplot as plt
-
+import warnings
 from skimage import measure, morphology
 
 
 
 def load_scan(path):
+    # 关于dicom的信息参看下面网址
+    # https://www.cnblogs.com/XDU-Lakers/p/9863114.html
     slices = [dicom.read_file(path + '/' + s) for s in os.listdir(path)]
-    slices.sort(key = lambda x: float(x.ImagePositionPatient[2]))
+    # 从下到上排列一下片子
+    slices.sort(key = lambda x: float(x.ImagePositionPatient[2]))# 可尝试用下map
+    # 这是在干啥？ 似乎在获得每个片子的厚度
     if slices[0].ImagePositionPatient[2] == slices[1].ImagePositionPatient[2]:
         sec_num = 2;
         while slices[0].ImagePositionPatient[2] == slices[sec_num].ImagePositionPatient[2]:
@@ -24,7 +29,9 @@ def load_scan(path):
         slice_thickness = np.abs(slices[0].ImagePositionPatient[2] - slices[1].ImagePositionPatient[2])
     except:
         slice_thickness = np.abs(slices[0].SliceLocation - slices[1].SliceLocation)
-        
+
+    # 给每张都增加一个SliceThickness的特征，原来这里会报错，可能是因为没有这个属性的原因，
+    # 在最前面的时候加上warnings就可以了
     for s in slices:
         s.SliceThickness = slice_thickness
         
@@ -32,7 +39,7 @@ def load_scan(path):
 
 def get_pixels_hu(slices):
     image = np.stack([s.pixel_array for s in slices])
-    # Convert to int16 (from sometimes int16), 
+    # Convert to int16 (from sometimes int16),
     # should be possible as values should always be low enough (<32k)
     image = image.astype(np.int16)
     
@@ -46,7 +53,7 @@ def get_pixels_hu(slices):
             image[slice_number] = image[slice_number].astype(np.int16)
             
         image[slice_number] += np.int16(intercept)
-    
+    # 第一个记录图片的像素信息 第二个值记录图的图片间距和像素间距
     return np.array(image, dtype=np.int16), np.array([slices[0].SliceThickness] + slices[0].PixelSpacing, dtype=np.float32)
 
 def binarize_per_slice(image, spacing, intensity_th=-600, sigma=1, area_th=30, eccen_th=0.99, bg_patch_size=10):
@@ -55,8 +62,10 @@ def binarize_per_slice(image, spacing, intensity_th=-600, sigma=1, area_th=30, e
     # prepare a mask, with all corner values set to nan
     image_size = image.shape[1]
     grid_axis = np.linspace(-image_size/2+0.5, image_size/2-0.5, image_size)
+    # 这在干什么？
     x, y = np.meshgrid(grid_axis, grid_axis)
     d = (x**2+y**2)**0.5
+    # 都变成带nan的矩阵 不过为什么？
     nan_mask = (d<image_size/2).astype(float)
     nan_mask[nan_mask == 0] = np.nan
     for i in range(image.shape[0]):
@@ -71,8 +80,10 @@ def binarize_per_slice(image, spacing, intensity_th=-600, sigma=1, area_th=30, e
         properties = measure.regionprops(label)
         valid_label = set()
         for prop in properties:
+            # prop.area * spacing[1] * spacing[2] -> 实际面积
             if prop.area * spacing[1] * spacing[2] > area_th and prop.eccentricity < eccen_th:
                 valid_label.add(prop.label)
+        # 打扰了
         current_bw = np.in1d(label, list(valid_label)).reshape(label.shape)
         bw[i] = current_bw
         
@@ -82,19 +93,19 @@ def all_slice_analysis(bw, spacing, cut_num=0, vol_limit=[0.68, 8.2], area_th=6e
     # in some cases, several top layers need to be removed first
     if cut_num > 0:
         bw0 = np.copy(bw)
-        bw[-cut_num:] = False
-    label = measure.label(bw, connectivity=1)
+        bw[-cut_num:] = False # 屏蔽顶上几张图片
+    label = measure.label(bw, connectivity=1) # 对二维图像来说是4链接
     # remove components access to corners
     mid = int(label.shape[2] / 2)
     bg_label = set([label[0, 0, 0], label[0, 0, -1], label[0, -1, 0], label[0, -1, -1], \
                     label[-1-cut_num, 0, 0], label[-1-cut_num, 0, -1], label[-1-cut_num, -1, 0], label[-1-cut_num, -1, -1], \
-                    label[0, 0, mid], label[0, -1, mid], label[-1-cut_num, 0, mid], label[-1-cut_num, -1, mid]])
+                    label[0, 0, mid], label[0, -1, mid], label[-1-cut_num, 0, mid], label[-1-cut_num, -1, mid]])# 为什么要用[2]的位置？
     for l in bg_label:
-        label[label == l] = 0
+        label[label == l] = 0 # 把在边境位置重复的值复位为0
         
     # select components based on volume
     properties = measure.regionprops(label)
-    for prop in properties:
+    for prop in properties: # 筛选合适大小的图片
         if prop.area * spacing.prod() < vol_limit[0] * 1e6 or prop.area * spacing.prod() > vol_limit[1] * 1e6:
             label[label == prop.label] = 0
             
@@ -102,7 +113,7 @@ def all_slice_analysis(bw, spacing, cut_num=0, vol_limit=[0.68, 8.2], area_th=6e
     x_axis = np.linspace(-label.shape[1]/2+0.5, label.shape[1]/2-0.5, label.shape[1]) * spacing[1]
     y_axis = np.linspace(-label.shape[2]/2+0.5, label.shape[2]/2-0.5, label.shape[2]) * spacing[2]
     x, y = np.meshgrid(x_axis, y_axis)
-    d = (x**2+y**2)**0.5
+    d = (x**2+y**2)**0.5 # 存储了每个点到原点的距离
     vols = measure.regionprops(label)
     valid_label = set()
     # select components based on their area and distance to center axis on all slices
@@ -111,9 +122,9 @@ def all_slice_analysis(bw, spacing, cut_num=0, vol_limit=[0.68, 8.2], area_th=6e
         slice_area = np.zeros(label.shape[0])
         min_distance = np.zeros(label.shape[0])
         for i in range(label.shape[0]):
-            slice_area[i] = np.sum(single_vol[i]) * np.prod(spacing[1:3])
-            min_distance[i] = np.min(single_vol[i] * d + (1 - single_vol[i]) * np.max(d))
-        
+            slice_area[i] = np.sum(single_vol[i]) * np.prod(spacing[1:3]) # 统计区域大小
+            min_distance[i] = np.min(single_vol[i] * d + (1 - single_vol[i]) * np.max(d)) # 统计最小距离（后面那个操作是为了让其他的非该区域的变得比该区域的值大）
+        # 加入判断 判断标准包括距离原点距离与面积大小
         if np.average([min_distance[i] for i in range(label.shape[0]) if slice_area[i] > area_th]) < dist_th:
             valid_label.add(vol.label)
             
@@ -125,11 +136,11 @@ def all_slice_analysis(bw, spacing, cut_num=0, vol_limit=[0.68, 8.2], area_th=6e
         bw1 = np.copy(bw)
         bw1[-cut_num:] = bw0[-cut_num:]
         bw2 = np.copy(bw)
-        bw2 = scipy.ndimage.binary_dilation(bw2, iterations=cut_num)
+        bw2 = scipy.ndimage.binary_dilation(bw2, iterations=cut_num) # 二进制膨胀 是否是三维的？
         bw3 = bw1 & bw2
         label = measure.label(bw, connectivity=1)
         label3 = measure.label(bw3, connectivity=1)
-        l_list = list(set(np.unique(label)) - {0})
+        l_list = list(set(np.unique(label)) - {0}) # 0是背景
         valid_l3 = set()
         for l in l_list:
             indices = np.nonzero(label==l)
@@ -232,7 +243,7 @@ def step1_python(case_path):
     flag = 0
     cut_num = 0
     cut_step = 2
-    bw0 = np.copy(bw)
+    bw0 = np.copy(bw) # 保留最初始的bw副本
     while flag == 0 and cut_num < bw.shape[0]:
         bw = np.copy(bw0)
         bw, flag = all_slice_analysis(bw, spacing, cut_num=cut_num, vol_limit=[0.68,7.5])
@@ -243,7 +254,8 @@ def step1_python(case_path):
     return case_pixels, bw1, bw2, spacing
     
 if __name__ == '__main__':
-    INPUT_FOLDER = '/work/DataBowl3/stage1/stage1/'
+    warnings.filterwarnings("ignore")  # 用来抑制第三方库产生的警告
+    INPUT_FOLDER = '/home/zxb/Dataset/DSB3/stage2/stage2/'
     patients = os.listdir(INPUT_FOLDER)
     patients.sort()
     case_pixels, m1, m2, spacing = step1_python(os.path.join(INPUT_FOLDER,patients[25]))
