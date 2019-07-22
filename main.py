@@ -27,7 +27,7 @@ skip_detect = config_submit['skip_detect']
 
 # 是否跳过预处理
 if not skip_prep:
-    #
+    #/home/432/zhouxibin/Dataset/DSB3/stage1/stage1/0015ceb851d7251b8f399e39779d1e7d/00ac2629fe659e68f4879da4812af659.dcm
     testsplit = full_prep(datapath,prep_result_path,
                           n_worker = config_submit['n_worker_preprocessing'],
                           use_existing=config_submit['use_exsiting_preprocessing'])
